@@ -1,42 +1,61 @@
-# Dockerfile
+# Gebruik een officiële Apache + PHP base image
+FROM php:8.2-apache
 
-FROM php:8.2-fpm
-
-# Install system dependencies
+# Installeer systeemafhankelijkheden en tools
 RUN apt-get update && apt-get install -y \
-    build-essential \
+    git \
+    curl \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
     zip \
     unzip \
-    git \
-    curl \
-    gnupg
+    nodejs \
+    npm && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (LTS)
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
+# Installeer PHP extensies
+RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
 
-# Install PHP extensions
-RUN docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd
-
-# Install Composer
+# Installeer Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Set working directory
-WORKDIR /var/www
+# Zet Apache configuratie
+RUN sed -i 's|/var/www/html|/var/www/html/public|g' /etc/apache2/sites-available/000-default.conf && \
+    a2enmod rewrite
 
-# Copy source files
+# Werkdirectory instellen
+WORKDIR /var/www/html
+
+# Kopieer eerst alleen de composer bestanden voor efficiënte caching
+COPY composer.json composer.lock ./
+
+# Installeer PHP dependencies (zonder scripts om .env issues te voorkomen)
+RUN composer install --no-scripts --no-autoloader --no-interaction --no-dev
+
+# Kopieer alle bestanden (exclude onnodige bestanden via .dockerignore)
 COPY . .
 
-# Install PHP dependencies
-RUN composer install
+# Environment voorbereiden
+RUN cp .env.example .env && \
+    composer dump-autoload --optimize && \
+    php artisan key:generate && \
+    php artisan config:cache
 
-# Install JS dependencies
+# Installeer NPM dependencies en bouw assets
 RUN npm install && npm run build
 
-# Serve the application
-CMD php artisan serve --host=0.0.0.0 --port=8000
+RUN php artisan migrate:fresh --seed
 
-EXPOSE 8000
+# Zet rechten goed
+RUN chown -R www-data:www-data /var/www/html && \
+    chmod -R 775 /var/www/html/storage && \
+    chmod -R 775 /var/www/html/bootstrap/cache
+
+# Expose poort 80
+EXPOSE 80
+
+# Start Apache in foreground
+CMD ["apache2-foreground"]
+
