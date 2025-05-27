@@ -46,7 +46,11 @@ RUN cp .env.example .env && \
 # Installeer NPM dependencies en bouw assets
 RUN npm install && npm run build
 
-RUN php artisan migrate:fresh --seed
+RUN npm install && npm run build
+
+RUN touch database/database.sqlite \
+    && php artisan migrate:fresh --seed
+
 
 # Zet rechten goed
 RUN chown -R www-data:www-data /var/www/html && \
